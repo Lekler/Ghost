@@ -242,7 +242,7 @@ module.exports = class MemberBREADService {
 
         const suppressionData = await this.emailSuppressionList.getSuppressionData(member.email);
         member.email_suppression = {
-            suppressed: suppressionData.suppressed,
+            suppressed: suppressionData.suppressed || !!model.get('email_disabled'),
             info: suppressionData.info
         };
 
@@ -325,6 +325,12 @@ module.exports = class MemberBREADService {
         let model;
 
         try {
+            // Update email_disabled based on whether the new email is suppressed
+            if (data.email) {
+                const isSuppressed = (await this.emailSuppressionList.getSuppressionData(data.email))?.suppressed;
+                data.email_disabled = !!isSuppressed;
+            }
+
             model = await this.memberRepository.update(data, options);
         } catch (error) {
             if (error.code && error.message.toLowerCase().indexOf('unique') !== -1) {
@@ -359,6 +365,10 @@ module.exports = class MemberBREADService {
         return this.read({id: model.id}, options);
     }
 
+    async logout(options) {
+        await this.memberRepository.cycleTransientId(options);
+    }
+
     async browse(options) {
         const defaultWithRelated = [
             'labels',
@@ -383,6 +393,9 @@ module.exports = class MemberBREADService {
             withRelated.add('email_recipients.email');
         }
 
+        //option param to skip distinct from count query, distinct adds a lot of latency and in this case the result set will always be unique.
+        options.useBasicCount = true;
+
         const page = await this.memberRepository.list({
             ...options,
             withRelated: Array.from(withRelated)
@@ -395,11 +408,10 @@ module.exports = class MemberBREADService {
         const subscriptions = page.data.flatMap(model => model.related('stripeSubscriptions').slice());
         const offerMap = await this.fetchSubscriptionOffers(subscriptions);
 
-        const members = page.data.map(model => model.toJSON(options));
+        const bulkSuppressionData = await this.emailSuppressionList.getBulkSuppressionData(page.data.map(member => member.get('email')));
 
-        const bulkSuppressionData = await this.emailSuppressionList.getBulkSuppressionData(members.map(member => member.email));
-
-        const data = members.map((member, index) => {
+        const data = page.data.map((model, index) => {
+            const member = model.toJSON(options);
             member.subscriptions = member.subscriptions.filter(sub => !!sub.price);
             this.attachSubscriptionsToMember(member);
             this.attachOffersToSubscriptions(member, offerMap);
@@ -407,7 +419,7 @@ module.exports = class MemberBREADService {
                 delete member.products;
             }
             member.email_suppression = {
-                suppressed: bulkSuppressionData[index].suppressed,
+                suppressed: bulkSuppressionData[index].suppressed || !!model.get('email_disabled'),
                 info: bulkSuppressionData[index].info
             };
             return member;

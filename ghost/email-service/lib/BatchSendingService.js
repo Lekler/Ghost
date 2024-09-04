@@ -130,8 +130,7 @@ class BatchSendingService {
     async emailJob({emailId}) {
         logging.info(`Starting email job for email ${emailId}`);
 
-        // We'll stop all automatic DB retries after this date
-        const retryCutOffTime = new Date(Date.now() + this.#BEFORE_RETRY_CONFIG.maxTime);
+        const startTime = Date.now();
 
         // Check if email is 'pending' only + change status to submitting in one transaction.
         // This allows us to have a lock around the email job that makes sure an email can only have one active job.
@@ -145,6 +144,12 @@ class BatchSendingService {
             logging.error(`Tried sending email that is not pending or failed ${emailId}`);
             return;
         }
+
+        // We'll stop all automatic DB retries after this date
+        const expectedBatchCount = Math.ceil(email.get('email_count') / 1000);
+        const minimumSecondsPerBatch = 26; // In case of database issues, we make sure we expand the retry window relative to the amount of batches
+        const stopAfter = Math.max(expectedBatchCount * minimumSecondsPerBatch * 1000, this.#BEFORE_RETRY_CONFIG.maxTime);
+        const retryCutOffTime = new Date(startTime + stopAfter);
 
         // Save a strict cutoff time for retries
         email._retryCutOffTime = retryCutOffTime;
@@ -216,7 +221,7 @@ class BatchSendingService {
     async getBatches(email) {
         logging.info(`Getting batches for email ${email.id}`);
 
-        return await this.#models.EmailBatch.findAll({filter: 'email_id:' + email.id});
+        return await this.#models.EmailBatch.findAll({filter: 'email_id:\'' + email.id + '\''});
     }
 
     /**
@@ -247,7 +252,9 @@ class BatchSendingService {
             while (!members || lastId) {
                 logging.info(`Fetching members batch for email ${email.id} segment ${segment}, lastId: ${lastId}`);
 
-                const filter = segmentFilter + `+id:<${lastId}`;
+                const filter = segmentFilter + `+id:<'${lastId}'`;
+                logging.info(`Fetching members batch for email ${email.id} segment ${segment}, lastId: ${lastId} ${filter}`);
+
                 members = await this.#models.Member.getFilteredCollectionQuery({filter})
                     .orderByRaw('id DESC')
                     .select('members.id', 'members.uuid', 'members.email', 'members.name').limit(BATCH_SIZE + 1);
@@ -275,6 +282,14 @@ class BatchSendingService {
 
         if (email.get('email_count') !== totalCount) {
             logging.error(`Email ${email.id} has wrong stored email_count ${email.get('email_count')}, did expect ${totalCount}. Updating the model.`);
+
+            // If the error rate is greater than 1%, we log it to Sentry so we can investigate
+            // Some differences are expected, e.g. if a new member signs up while we are sending the email
+            const errorRate = Math.abs((totalCount - email.get('email_count')) / email.get('email_count'));
+            if (this.#sentry && errorRate >= 0.01) {
+                // we don't have a real exception, so just log a message to Sentry
+                this.#sentry.captureMessage(`Email ${email.id} has wrong stored email_count ${email.get('email_count')}, did expect ${totalCount}.`);
+            }
 
             // We update the email model because this might happen in rare cases where the initial member count changed (e.g. deleted members)
             // between creating the email and sending it
@@ -501,22 +516,13 @@ class BatchSendingService {
      * @returns {Promise<MemberLike[]>}
      */
     async getBatchMembers(batchId) {
-        let models = await this.#models.EmailRecipient.findAll({filter: `batch_id:${batchId}`, withRelated: ['member', 'member.stripeSubscriptions', 'member.products']});
+        let models = await this.#models.EmailRecipient.findAll({filter: `batch_id:'${batchId}'`, withRelated: ['member', 'member.stripeSubscriptions', 'member.products']});
 
         const BATCH_SIZE = this.#sendingService.getMaximumRecipients();
         if (models.length > BATCH_SIZE) {
-            // @NOTE: filtering by batch_id is our best effort to "correct" returned data
-            logging.warn(`Email batch ${batchId} has ${models.length} members, which exceeds the maximum of ${BATCH_SIZE} members per batch. Filtering by batch_id: ${batchId}`);
-            models = models.filter(m => m.get('batch_id') === batchId);
-
-            if (models.length > BATCH_SIZE) {
-                // @NOTE this is a best effort logic to still try sending an email batch
-                //       even if it exceeds the maximum recipients limit of the sending service.
-                //       In theory this should never happen, but being extra safe to make sure
-                //       the email delivery still happens.
-                logging.error(`Email batch ${batchId} has ${models.length} members, which exceeds the maximum of ${BATCH_SIZE}. Truncating to ${BATCH_SIZE}`);
-                models = models.slice(0, BATCH_SIZE);
-            }
+            throw new errors.EmailError({
+                message: `Email batch ${batchId} has ${models.length} members, which exceeds the maximum of ${BATCH_SIZE} members per batch.`
+            });
         }
 
         return models.map((model) => {
@@ -582,18 +588,28 @@ class BatchSendingService {
                 options = {...options, stopAfterDate};
             }
         }
+        const retryCount = (options.retryCount ?? 0);
 
         try {
-            return await func();
+            if (retryCount > 0) {
+                logging.info(`[BULK_EMAIL_DB_RETRY] ${options.description} - Retrying ${retryCount + 1}th try`);
+            } else {
+                logging.info(`[BULK_EMAIL_DB_RETRY] ${options.description} - Started (1st try)`);
+            }
+
+            const response = await func();
+
+            logging.info(`[BULK_EMAIL_DB_RETRY] ${options.description} - Finished (after ${retryCount + 1}${retryCount === 0 ? 'st try' : ' tries'})`);
+
+            return response;
         } catch (e) {
-            const retryCount = (options.retryCount ?? 0);
             const sleep = (options.sleep ?? 0);
             if (retryCount >= options.maxRetries || (options.stopAfterDate && (new Date(Date.now() + sleep)) > options.stopAfterDate)) {
                 if (retryCount > 0) {
                     const ghostError = new errors.EmailError({
                         err: e,
                         code: 'BULK_EMAIL_DB_RETRY',
-                        message: `[BULK_EMAIL_DB_RETRY] ${options.description} - Stopped retrying`,
+                        message: `[BULK_EMAIL_DB_RETRY] ${options.description} - Failed and stopped retrying: ${retryCount >= options.maxRetries ? 'max retries reached' : 'max time reached'}`,
                         context: e.message
                     });
 
@@ -605,7 +621,7 @@ class BatchSendingService {
             const ghostError = new errors.EmailError({
                 err: e,
                 code: 'BULK_EMAIL_DB_RETRY',
-                message: `[BULK_EMAIL_DB_RETRY] ${options.description} - After ${retryCount} retries`,
+                message: `[BULK_EMAIL_DB_RETRY] ${options.description} - Failed (${retryCount + 1}${retryCount === 0 ? 'st' : 'th'} try)`,
                 context: e.message
             });
 

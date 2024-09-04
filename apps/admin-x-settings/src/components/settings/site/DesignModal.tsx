@@ -1,22 +1,17 @@
 import BrandSettings, {BrandSettingValues} from './designAndBranding/BrandSettings';
-// import Button from '../../../admin-x-ds/global/Button';
-// import ChangeThemeModal from './ThemeModal';
-import Icon from '../../../admin-x-ds/global/Icon';
 import React, {useEffect, useState} from 'react';
-import StickyFooter from '../../../admin-x-ds/global/StickyFooter';
-import TabView, {Tab} from '../../../admin-x-ds/global/TabView';
 import ThemePreview from './designAndBranding/ThemePreview';
 import ThemeSettings from './designAndBranding/ThemeSettings';
-import useForm from '../../../hooks/useForm';
-import useHandleError from '../../../utils/api/handleError';
-import useRouting from '../../../hooks/useRouting';
-import {CustomThemeSetting, useBrowseCustomThemeSettings, useEditCustomThemeSettings} from '../../../api/customThemeSettings';
-import {PreviewModalContent} from '../../../admin-x-ds/global/modal/PreviewModal';
-import {Setting, SettingValue, getSettingValues, useEditSettings} from '../../../api/settings';
-import {getHomepageUrl} from '../../../api/site';
-import {useBrowsePosts} from '../../../api/posts';
-import {useBrowseThemes} from '../../../api/themes';
+import useQueryParams from '../../../hooks/useQueryParams';
+import {CustomThemeSetting, useBrowseCustomThemeSettings, useEditCustomThemeSettings} from '@tryghost/admin-x-framework/api/customThemeSettings';
+import {Icon, PreviewModalContent, StickyFooter, Tab, TabView} from '@tryghost/admin-x-design-system';
+import {Setting, SettingValue, getSettingValues, useEditSettings} from '@tryghost/admin-x-framework/api/settings';
+import {getHomepageUrl} from '@tryghost/admin-x-framework/api/site';
+import {useBrowsePosts} from '@tryghost/admin-x-framework/api/posts';
+import {useBrowseThemes} from '@tryghost/admin-x-framework/api/themes';
+import {useForm, useHandleError} from '@tryghost/admin-x-framework/hooks';
 import {useGlobalData} from '../../providers/GlobalDataProvider';
+import {useRouting} from '@tryghost/admin-x-framework/routing';
 
 const Sidebar: React.FC<{
     brandSettings: BrandSettingValues
@@ -36,6 +31,7 @@ const Sidebar: React.FC<{
     const {updateRoute} = useRouting();
     const [selectedTab, setSelectedTab] = useState('brand');
     const {data: {themes} = {}} = useBrowseThemes();
+    const refParam = useQueryParams().getParam('ref');
 
     const activeTheme = themes?.find(theme => theme.active);
 
@@ -66,7 +62,11 @@ const Sidebar: React.FC<{
                 <div className='w-full px-7'>
                     <button className='group flex w-full items-center justify-between text-sm font-medium opacity-80 transition-all hover:opacity-100' data-testid='change-theme' type='button' onClick={async () => {
                         await handleSave();
-                        updateRoute('design/change-theme');
+                        if (refParam) {
+                            updateRoute(`design/change-theme?ref=${refParam}`);
+                        } else {
+                            updateRoute('design/change-theme');
+                        }
                     }}>
                         <div className='text-left'>
                             <div className='font-semibold'>Change theme</div>
@@ -97,26 +97,30 @@ const DesignModal: React.FC = () => {
     const [selectedPreviewTab, setSelectedPreviewTab] = useState('homepage');
     const {updateRoute} = useRouting();
 
+    const refParam = useQueryParams().getParam('ref');
+
     const {
         formState,
         saveState,
         handleSave,
         updateForm,
-        setFormState
+        setFormState,
+        okProps
     } = useForm({
         initialState: {
             settings: settings as Array<Setting & { dirty?: boolean }>,
             themeSettings: themeSettings ? (themeSettings.custom_theme_settings as Array<CustomThemeSetting & { dirty?: boolean }>) : undefined
         },
+        savingDelay: 500,
         onSave: async () => {
             if (formState.themeSettings?.some(setting => setting.dirty)) {
                 const response = await editThemeSettings(formState.themeSettings);
-                updateForm(state => ({...state, themeSettings: response.custom_theme_settings}));
+                setFormState(state => ({...state, themeSettings: response.custom_theme_settings}));
             }
 
             if (formState.settings.some(setting => setting.dirty)) {
                 const {settings: newSettings} = await editSettings(formState.settings.filter(setting => setting.dirty));
-                updateForm(state => ({...state, settings: newSettings}));
+                setFormState(state => ({...state, settings: newSettings}));
             }
         },
         onSaveError: handleError
@@ -213,14 +217,18 @@ const DesignModal: React.FC = () => {
 
     return <PreviewModalContent
         afterClose={() => {
-            updateRoute('design');
+            if (refParam === 'setup') {
+                window.location.hash = '/dashboard/';
+            } else {
+                updateRoute('design');
+            }
         }}
-        buttonsDisabled={saveState === 'saving'}
+        buttonsDisabled={okProps.disabled}
         cancelLabel='Close'
         defaultTab='homepage'
         dirty={saveState === 'unsaved'}
-        okColor={saveState === 'saved' ? 'green' : 'black'}
-        okLabel={saveState === 'saved' ? 'Saved' : (saveState === 'saving' ? 'Saving...' : 'Save')}
+        okColor={okProps.color}
+        okLabel={okProps.label || 'Save'}
         preview={previewContent}
         previewToolbarTabs={previewTabs}
         selectedURL={selectedPreviewTab}
@@ -231,7 +239,7 @@ const DesignModal: React.FC = () => {
         testId='design-modal'
         title='Design'
         onOk={async () => {
-            await handleSave();
+            await handleSave({fakeWhenUnchanged: true});
         }}
         onSelectURL={onSelectURL}
     />;

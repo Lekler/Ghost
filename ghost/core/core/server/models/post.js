@@ -904,7 +904,7 @@ Post = ghostBookshelf.Model.extend({
             ops.push(function updateRevisions() {
                 return ghostBookshelf.model('MobiledocRevision')
                     .findAll(Object.assign({
-                        filter: `post_id:${model.id}`,
+                        filter: `post_id:'${model.id}'`,
                         columns: ['id']
                     }, _.pick(options, 'transacting')))
                     .then((revisions) => {
@@ -958,7 +958,7 @@ Post = ghostBookshelf.Model.extend({
             ops.push(async function updateRevisions() {
                 const revisionModels = await ghostBookshelf.model('PostRevision')
                     .findAll(Object.assign({
-                        filter: `post_id:${model.id}`,
+                        filter: `post_id:'${model.id}'`,
                         columns: ['id', 'lexical', 'created_at', 'author_id', 'title', 'reason', 'post_status', 'created_at_ts', 'feature_image']
                     }, _.pick(options, 'transacting')));
 
@@ -973,6 +973,7 @@ Post = ghostBookshelf.Model.extend({
                     feature_image_alt: model.get('posts_meta')?.feature_image_alt,
                     feature_image_caption: model.get('posts_meta')?.feature_image_caption,
                     title: model.get('title'),
+                    custom_excerpt: model.get('custom_excerpt'),
                     post_status: model.get('status')
                 };
 
@@ -1004,6 +1005,12 @@ Post = ghostBookshelf.Model.extend({
             this.set('tiers', this.get('tiers').map(t => ({
                 id: t.id
             })));
+
+            // Don't associate the free tier with the post
+            const freeTier = await ghostBookshelf.model('Product').findOne({type: 'free'}, {require: false, transacting: options.transacting ?? undefined});
+            if (freeTier) {
+                this.set('tiers', this.get('tiers').filter(t => t.id !== freeTier.id));
+            }
         }
 
         if (labs.isSet('collectionsCard') && this.get('type') === 'post' && (newStatus === 'published' || olderStatus === 'published')) {
@@ -1253,7 +1260,7 @@ Post = ghostBookshelf.Model.extend({
         // these are the only options that can be passed to Bookshelf / Knex.
         const validOptions = {
             findOne: ['columns', 'importing', 'withRelated', 'require', 'filter'],
-            findPage: ['status'],
+            findPage: ['status','selectRaw'],
 
             findAll: ['columns', 'filter'],
             destroy: ['destroyAll', 'destroyBy'],

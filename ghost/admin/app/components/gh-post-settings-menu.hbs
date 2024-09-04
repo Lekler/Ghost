@@ -93,7 +93,7 @@
                             {{/if}}
                         {{/if}}
 
-
+                        {{#unless (feature 'editorExcerpt')}}
                         <GhFormGroup @errors={{this.post.errors}} @hasValidated={{this.post.hasValidated}} @property="customExcerpt">
                             <label for="custom-excerpt">Excerpt</label>
                             <GhTextarea
@@ -108,6 +108,7 @@
                             />
                             <GhErrorMessage @errors={{this.post.errors}} @property="customExcerpt" data-test-error="custom-excerpt" />
                         </GhFormGroup>
+                        {{/unless}}
 
                         {{#unless this.session.user.isAuthorOrContributor}}
                             <GhFormGroup class="for-select mb8" @errors={{this.post.errors}} @hasValidated={{this.post.hasValidated}} @property="authors" data-test-input="authors">
@@ -219,7 +220,7 @@
                 </form>
                 {{#unless this.post.isNew}}
                     <div class="settings-menu-delete-button">
-                        <button type="button" class="gh-btn gh-btn-outline gh-btn-icon gh-btn-fullwidth" {{action "deletePostInternal"}}>
+                        <button type="button" class="gh-btn gh-btn-outline gh-btn-icon gh-btn-fullwidth" {{action "deletePostInternal"}} data-test-button="delete-post">
                             <span>{{svg-jar "trash"}} Delete {{this.post.displayName}}</span>
                         </button>
                     </div>
@@ -265,8 +266,9 @@
                                     <div class="gh-shortcut">
                                         <div><s>Strike through</s></div>
                                         <div class="gh-keys">
-                                            <GhPostSettingsMenu::CtrlOrCmd />
-                                            <span class="gh-key mono">X</span>
+                                            <GhPostSettingsMenu::CtrlOrSymbol />
+                                            <GhPostSettingsMenu::OptionOrAlt />
+                                            <span class="gh-key mono">U</span>
                                         </div>
                                     </div>
                                     <div class="gh-shortcut">
@@ -318,15 +320,16 @@
                                         <div>H2</div>
                                         <div class="gh-keys">
                                             <GhPostSettingsMenu::CtrlOrSymbol />
-                                            <span class="gh-key mono">H</span>
+                                            <GhPostSettingsMenu::OptionOrAlt />
+                                            <span class="gh-key mono">2</span>
                                         </div>
                                     </div>
                                     <div class="gh-shortcut">
                                         <div>H3</div>
                                         <div class="gh-keys">
                                             <GhPostSettingsMenu::CtrlOrSymbol />
-                                            <span class="gh-key mono">H</span>
-                                            <span class="gh-key mono clear">2x</span>
+                                            <GhPostSettingsMenu::OptionOrAlt />
+                                            <span class="gh-key mono">3</span>
                                         </div>
                                     </div>
                                 </GhFormGroup>
@@ -425,6 +428,12 @@
                                         <div class="gh-keys">
                                             <span class="gh-key mono">```html</span>
                                             <span class="gh-key" data-tooltip="Return">&#8617;</span>
+                                        </div>
+                                    </div>
+                                    <div class="gh-shortcut">
+                                        <div>Emoji</div>
+                                        <div class="gh-keys">
+                                            <span class="gh-key mono">:emoji_name:</span>
                                         </div>
                                     </div>
                                     <div class="gh-shortcut">
@@ -844,6 +853,7 @@
                     post=this.post
                     editorAPI=this.editorAPI
                     toggleSettingsMenu=this.toggleSettingsMenu
+                    secondaryEditorAPI=this.secondaryEditorAPI
                 }}
                 @close={{this.closePostHistory}}
                 @modifier="total-overlay post-history" />

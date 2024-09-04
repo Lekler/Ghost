@@ -1,5 +1,6 @@
 import {expect, test} from '@playwright/test';
-import {globalDataRequests, mockApi, responseFixtures, updatedSettingsResponse} from '../../../utils/acceptance';
+import {globalDataRequests} from '../../../utils/acceptance';
+import {mockApi, responseFixtures, updatedSettingsResponse} from '@tryghost/admin-x-framework/test/acceptance';
 
 test.describe('AMP integration', async () => {
     test('Supports toggling and filling in AMP integration', async ({page}) => {
@@ -50,7 +51,7 @@ test.describe('AMP integration', async () => {
         const ampToggle = ampModal.getByRole('switch');
         await ampToggle.click();
 
-        await ampModal.getByRole('button', {name: 'Cancel'}).click();
+        await ampModal.getByRole('button', {name: 'Close'}).click();
 
         await expect(page.getByTestId('confirmation-modal')).toHaveText(/leave/i);
 

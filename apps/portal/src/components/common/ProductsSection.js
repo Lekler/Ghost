@@ -51,7 +51,6 @@ export const ProductsSectionStyles = () => {
             height: 100% !important;
             width: 50%;
             border-radius: 999px;
-            color: var(--grey7);
             background: transparent;
             font-size: 1.5rem;
         }
@@ -77,6 +76,12 @@ export const ProductsSectionStyles = () => {
 
         .gh-portal-priceoption-label.inactive {
             color: var(--grey8);
+        }
+
+        .gh-portal-maximum-discount {
+            font-weight: 400;
+            margin-left: 4px;
+            opacity: 0.5;
         }
 
         .gh-portal-products-grid {
@@ -847,9 +852,17 @@ function YearlyDiscount({discount}) {
     }
 }
 
-function ProductPriceSwitch({selectedInterval, setSelectedInterval}) {
+function ProductPriceSwitch({selectedInterval, setSelectedInterval, products}) {
     const {site, t} = useContext(AppContext);
     const {portal_plans: portalPlans} = site;
+    const paidProducts = products.filter(product => product.type !== 'free');
+
+    // Extract discounts from products
+    const prices = paidProducts.map(product => calculateDiscount(product.monthlyPrice?.amount, product.yearlyPrice?.amount));
+
+    // Find the highest price using Math.max
+    const highestYearlyDiscount = Math.max(...prices);
+
     if (!portalPlans.includes('monthly') || !portalPlans.includes('yearly')) {
         return null;
     }
@@ -859,6 +872,7 @@ function ProductPriceSwitch({selectedInterval, setSelectedInterval}) {
             <div className={'gh-portal-products-pricetoggle' + (selectedInterval === 'month' ? ' left' : '')}>
                 <button
                     data-test-button='switch-monthly'
+                    data-testid="monthly-switch"
                     className={'gh-portal-btn' + (selectedInterval === 'month' ? ' active' : '')}
                     onClick={() => {
                         setSelectedInterval('month');
@@ -868,12 +882,14 @@ function ProductPriceSwitch({selectedInterval, setSelectedInterval}) {
                 </button>
                 <button
                     data-test-button='switch-yearly'
+                    data-testid="yearly-switch"
                     className={'gh-portal-btn' + (selectedInterval === 'year' ? ' active' : '')}
                     onClick={() => {
                         setSelectedInterval('year');
                     }}
                 >
                     {t('Yearly')}
+                    {(highestYearlyDiscount > 0) && <span className='gh-portal-maximum-discount'>{t('(save {{highestYearlyDiscount}}%)', {highestYearlyDiscount})}</span>}
                 </button>
             </div>
         </div>
@@ -894,7 +910,7 @@ function getSelectedPrice({products, selectedProduct, selectedInterval}) {
     return selectedPrice;
 }
 
-function getActiveInterval({portalPlans, selectedInterval = 'year'}) {
+function getActiveInterval({portalPlans, portalDefaultPlan, selectedInterval}) {
     if (selectedInterval === 'month' && portalPlans.includes('monthly')) {
         return 'month';
     }
@@ -903,28 +919,35 @@ function getActiveInterval({portalPlans, selectedInterval = 'year'}) {
         return 'year';
     }
 
-    if (portalPlans.includes('monthly')) {
-        return 'month';
+    if (portalDefaultPlan) {
+        if (portalDefaultPlan === 'monthly' && portalPlans.includes('monthly')) {
+            return 'month';
+        }
     }
 
     if (portalPlans.includes('yearly')) {
         return 'year';
     }
+
+    if (portalPlans.includes('monthly')) {
+        return 'month';
+    }
 }
 
 function ProductsSection({onPlanSelect, products, type = null, handleChooseSignup, errors}) {
     const {site, member, t} = useContext(AppContext);
-    const {portal_plans: portalPlans} = site;
-    const defaultInterval = getActiveInterval({portalPlans});
-
+    const {portal_plans: portalPlans, portal_default_plan: portalDefaultPlan} = site;
     const defaultProductId = products.length > 0 ? products[0].id : 'free';
-    const [selectedInterval, setSelectedInterval] = useState(defaultInterval);
+
+    // Note: by default we set it to null, so that it changes reactively in the preview version of Portal
+    const [selectedInterval, setSelectedInterval] = useState(null);
     const [selectedProduct, setSelectedProduct] = useState(defaultProductId);
 
     const selectedPrice = getSelectedPrice({products, selectedInterval, selectedProduct});
-    const activeInterval = getActiveInterval({portalPlans, selectedInterval});
+    const activeInterval = getActiveInterval({portalPlans, portalDefaultPlan, selectedInterval});
 
     const isComplimentary = isComplimentaryMember({member});
+    const hasOnlyFree = hasOnlyFreeProduct({site});
 
     useEffect(() => {
         setSelectedProduct(defaultProductId);
@@ -933,10 +956,6 @@ function ProductsSection({onPlanSelect, products, type = null, handleChooseSignu
     useEffect(() => {
         onPlanSelect(null, selectedPrice.id);
     }, [selectedPrice.id, onPlanSelect]);
-
-    if (!portalPlans.includes('monthly') && !portalPlans.includes('yearly')) {
-        return null;
-    }
 
     if (products.length === 0) {
         if (isComplimentary) {
@@ -965,7 +984,7 @@ function ProductsSection({onPlanSelect, products, type = null, handleChooseSignu
         }}>
             <section className={className}>
 
-                {(!(hasOnlyFreeProduct({site})) ?
+                {(!(hasOnlyFree) ?
                     <ProductPriceSwitch
                         products={products}
                         selectedInterval={activeInterval}
@@ -1025,6 +1044,7 @@ export function ChangeProductSection({onPlanSelect, selectedPlan, products, type
                 <ProductPriceSwitch
                     selectedInterval={activeInterval}
                     setSelectedInterval={setSelectedInterval}
+                    products={products}
                 />
 
                 <div className="gh-portal-products-grid">

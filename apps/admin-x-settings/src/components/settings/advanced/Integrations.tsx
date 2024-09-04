@@ -1,26 +1,19 @@
-import Button from '../../../admin-x-ds/global/Button';
-import ConfirmationModal from '../../../admin-x-ds/global/modal/ConfirmationModal';
-import Icon from '../../../admin-x-ds/global/Icon';
-import List from '../../../admin-x-ds/global/List';
-import ListItem from '../../../admin-x-ds/global/ListItem';
 import NiceModal from '@ebay/nice-modal-react';
-import NoValueLabel from '../../../admin-x-ds/global/NoValueLabel';
 import React, {useState} from 'react';
-import SettingGroup from '../../../admin-x-ds/settings/SettingGroup';
-import TabView from '../../../admin-x-ds/global/TabView';
-import useHandleError from '../../../utils/api/handleError';
-import useRouting from '../../../hooks/useRouting';
+import TopLevelGroup from '../../TopLevelGroup';
+import usePinturaEditor from '../../../hooks/usePinturaEditor';
 import {ReactComponent as AmpIcon} from '../../../assets/icons/amp.svg';
+import {Button, ConfirmationModal, Icon, List, ListItem, NoValueLabel, TabView, showToast, withErrorBoundary} from '@tryghost/admin-x-design-system';
 import {ReactComponent as FirstPromoterIcon} from '../../../assets/icons/firstpromoter.svg';
-import {Integration, useBrowseIntegrations, useDeleteIntegration} from '../../../api/integrations';
+import {Integration, useBrowseIntegrations, useDeleteIntegration} from '@tryghost/admin-x-framework/api/integrations';
 import {ReactComponent as PinturaIcon} from '../../../assets/icons/pintura.svg';
 import {ReactComponent as SlackIcon} from '../../../assets/icons/slack.svg';
 import {ReactComponent as UnsplashIcon} from '../../../assets/icons/unsplash.svg';
 import {ReactComponent as ZapierIcon} from '../../../assets/icons/zapier.svg';
-import {getSettingValues} from '../../../api/settings';
-import {showToast} from '../../../admin-x-ds/global/Toast';
+import {getSettingValues} from '@tryghost/admin-x-framework/api/settings';
 import {useGlobalData} from '../../providers/GlobalDataProvider';
-import {withErrorBoundary} from '../../../admin-x-ds/global/ErrorBoundary';
+import {useHandleError} from '@tryghost/admin-x-framework/hooks';
+import {useRouting} from '@tryghost/admin-x-framework/routing';
 
 interface IntegrationItemProps {
     icon?: React.ReactNode,
@@ -49,7 +42,7 @@ const IntegrationItem: React.FC<IntegrationItemProps> = ({
 
     const handleClick = () => {
         if (disabled) {
-            updateRoute({route: 'pro'});
+            updateRoute({route: 'pro', isExternal: true});
         } else {
             action();
         }
@@ -85,8 +78,16 @@ const BuiltInIntegrations: React.FC = () => {
 
     const zapierDisabled = config.hostSettings?.limits?.customIntegrations?.disabled;
 
+    const pinturaEditor = usePinturaEditor();
+
     const {settings} = useGlobalData();
-    const [ampEnabled, unsplashEnabled, pinturaEnabled, firstPromoterEnabled, slackUrl, slackUsername] = getSettingValues<boolean>(settings, ['amp', 'unsplash', 'pintura', 'firstpromoter', 'slack_url', 'slack_username']);
+    const [ampEnabled, unsplashEnabled, firstPromoterEnabled, slackUrl, slackUsername] = getSettingValues<boolean>(settings, [
+        'amp',
+        'unsplash',
+        'firstpromoter',
+        'slack_url',
+        'slack_username'
+    ]);
 
     return (
         <List titleSeparator={false}>
@@ -107,6 +108,7 @@ const BuiltInIntegrations: React.FC = () => {
                 active={slackUrl && slackUsername}
                 detail='A messaging app for teams'
                 icon={<SlackIcon className='h-8 w-8' />}
+                testId='slack-integration'
                 title='Slack' />
 
             <IntegrationItem
@@ -114,8 +116,9 @@ const BuiltInIntegrations: React.FC = () => {
                     openModal('integrations/amp');
                 }}
                 active={ampEnabled}
-                detail='Google Accelerated Mobile Pages'
+                detail='Google AMP will be removed in Ghost 6.0'
                 icon={<AmpIcon className='h-8 w-8' />}
+                testId='amp-integration'
                 title='AMP' />
 
             <IntegrationItem
@@ -125,6 +128,7 @@ const BuiltInIntegrations: React.FC = () => {
                 active={unsplashEnabled}
                 detail='Beautiful, free photos'
                 icon={<UnsplashIcon className='h-8 w-8' />}
+                testId='unsplash-integration'
                 title='Unsplash' />
 
             <IntegrationItem
@@ -134,16 +138,18 @@ const BuiltInIntegrations: React.FC = () => {
                 active={firstPromoterEnabled}
                 detail='Launch your member referral program'
                 icon={<FirstPromoterIcon className='h-8 w-8' />}
+                testId='firstpromoter-integration'
                 title='FirstPromoter' />
 
             <IntegrationItem
                 action={() => {
                     openModal('integrations/pintura');
                 }}
-                active={pinturaEnabled}
-                detail='Advanced image editing' icon=
-                    {<PinturaIcon className='h-8 w-8' />} title
-                    ='Pintura' />
+                active={pinturaEditor.isEnabled}
+                detail='Advanced image editing'
+                icon={<PinturaIcon className='h-8 w-8' />}
+                testId='pintura-integration'
+                title='Pintura' />
         </List>
     );
 };
@@ -178,8 +184,11 @@ const CustomIntegrations: React.FC<{integrations: Integration[]}> = ({integratio
                                         await deleteIntegration(integration.id);
                                         confirmModal?.remove();
                                         showToast({
-                                            message: 'Integration deleted',
-                                            type: 'success'
+                                            title: 'Integration deleted',
+                                            type: 'info',
+                                            options: {
+                                                position: 'bottom-left'
+                                            }
                                         });
                                     } catch (e) {
                                         handleError(e);
@@ -217,14 +226,14 @@ const Integrations: React.FC<{ keywords: string[] }> = ({keywords}) => {
     ] as const;
 
     const buttons = (
-        <Button className='hidden md:!visible md:!block' color='green' label='Add custom integration' link linkWithPadding onClick={() => {
+        <Button className='mt-[-5px] hidden md:!visible md:!block' color='clear' label='Add custom integration' size='sm' onClick={() => {
             updateRoute('integrations/new');
             setSelectedTab('custom');
         }} />
     );
 
     return (
-        <SettingGroup
+        <TopLevelGroup
             customButtons={buttons}
             description="Make Ghost work with apps and tools"
             keywords={keywords}
@@ -239,7 +248,7 @@ const Integrations: React.FC<{ keywords: string[] }> = ({keywords}) => {
                 }} />
             </div>
             <TabView<'built-in' | 'custom'> selectedTab={selectedTab} tabs={tabs} onTabChange={setSelectedTab} />
-        </SettingGroup>
+        </TopLevelGroup>
     );
 };
 

@@ -1,25 +1,11 @@
-import Avatar from '../../../admin-x-ds/global/Avatar';
-import Button from '../../../admin-x-ds/global/Button';
-import Icon from '../../../admin-x-ds/global/Icon';
-import InfiniteScrollListener from '../../../admin-x-ds/global/InfiniteScrollListener';
-import List from '../../../admin-x-ds/global/List';
-import ListItem from '../../../admin-x-ds/global/ListItem';
-import Modal from '../../../admin-x-ds/global/modal/Modal';
 import NiceModal, {useModal} from '@ebay/nice-modal-react';
-import NoValueLabel from '../../../admin-x-ds/global/NoValueLabel';
-import Popover from '../../../admin-x-ds/global/Popover';
-import Select, {SelectOption} from '../../../admin-x-ds/global/form/Select';
-import Toggle from '../../../admin-x-ds/global/form/Toggle';
-import ToggleGroup from '../../../admin-x-ds/global/form/ToggleGroup';
-import useFilterableApi from '../../../hooks/useFilterableApi';
-import useRouting from '../../../hooks/useRouting';
-import {Action, getActionTitle, getContextResource, getLinkTarget, isBulkAction, useBrowseActions} from '../../../api/actions';
-import {LoadOptions} from '../../../admin-x-ds/global/form/MultiSelect';
-import {RoutingModalProps} from '../../providers/RoutingProvider';
-import {User} from '../../../api/users';
-import {debounce} from '../../../utils/debounce';
+import {Action, getActionTitle, getContextResource, getLinkTarget, isBulkAction, useBrowseActions} from '@tryghost/admin-x-framework/api/actions';
+import {Avatar, Button, Icon, InfiniteScrollListener, List, ListItem, LoadSelectOptions, Modal, NoValueLabel, Popover, Select, SelectOption, Toggle, ToggleGroup, debounce} from '@tryghost/admin-x-design-system';
+import {RoutingModalProps, useRouting} from '@tryghost/admin-x-framework/routing';
+import {User} from '@tryghost/admin-x-framework/api/users';
 import {generateAvatarColor, getInitials} from '../../../utils/helpers';
 import {useCallback, useState} from 'react';
+import {useFilterableApi} from '@tryghost/admin-x-framework/hooks';
 
 const HistoryIcon: React.FC<{action: Action}> = ({action}) => {
     let name = 'pen';
@@ -41,7 +27,7 @@ const HistoryAvatar: React.FC<{action: Action}> = ({action}) => {
         <div className='relative shrink-0'>
             <Avatar
                 bgColor={generateAvatarColor(action.actor?.name || action.actor?.slug || '')}
-                image={action.actor?.image}
+                image={action.actor?.image ?? undefined}
                 label={getInitials(action.actor?.name || action.actor?.slug)}
                 labelColor='white'
                 size='md'
@@ -78,7 +64,7 @@ const HistoryFilter: React.FC<{
     const {updateRoute} = useRouting();
     const usersApi = useFilterableApi<User, 'users', 'name'>({path: '/users/', filterKey: 'name', responseKey: 'users'});
 
-    const loadOptions: LoadOptions = async (input, callback) => {
+    const loadOptions: LoadSelectOptions = async (input, callback) => {
         const users = await usersApi.loadData(input);
         callback(users.map(user => ({label: user.name, value: user.id})));
     };
@@ -91,7 +77,7 @@ const HistoryFilter: React.FC<{
 
     return (
         <div className='flex items-center gap-4'>
-            <Popover position='right' trigger={<Button color='outline' label='Filter' size='sm' />}>
+            <Popover position='end' trigger={<Button color='outline' label='Filter' size='sm' />}>
                 <div className='flex w-[220px] flex-col gap-8 p-5'>
                     <ToggleGroup>
                         <HistoryFilterToggle excludedItems={excludedEvents} item='added' label='Added' toggleItem={toggleEventType} />
@@ -141,16 +127,16 @@ const HistoryActionDescription: React.FC<{action: Action}> = ({action}) => {
             {group.slice(0, 1).toUpperCase()}{group.slice(1)}
             {group !== key && <span className='text-xs'> <code className='mb-1 bg-white text-grey-800 dark:bg-grey-900 dark:text-white'>({key})</code></span>}
         </>;
-    } else if (action.resource?.title || action.resource?.name || action.context.primary_name) {
+    } else if (action.resource?.title || action.resource?.name || action.context?.primary_name) {
         const linkTarget = getLinkTarget(action);
 
         if (linkTarget) {
-            return <a className='font-bold' href='#' onClick={(e) => {
+            return <a className='cursor-pointer font-bold' onClick={(e) => {
                 e.preventDefault();
                 updateRoute(linkTarget);
             }}>{action.resource?.title || action.resource?.name}</a>;
         } else {
-            return <>{action.resource?.title || action.resource?.name || action.context.primary_name}</>;
+            return <>{action.resource?.title || action.resource?.name || action.context?.primary_name}</>;
         }
     } else {
         return <span className='text-grey-500'>(unknown)</span>;
@@ -188,7 +174,7 @@ const HistoryModal = NiceModal.create<RoutingModalProps>(({params}) => {
             filter: [
                 excludedEvents.length && `event:-[${excludedEvents.join(',')}]`,
                 excludedResources.length && `resource_type:-[${excludedResources.join(',')}]`,
-                params?.user && `actor_id:${params.user}`
+                params?.user && `actor_id:'${params.user}'`
             ].filter(Boolean).join('+')
         },
         getNextPageParams: (lastPage, otherParams) => ({

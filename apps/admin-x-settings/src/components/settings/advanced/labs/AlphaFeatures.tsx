@@ -1,7 +1,7 @@
 import FeatureToggle from './FeatureToggle';
 import LabItem from './LabItem';
-import List from '../../../../admin-x-ds/global/List';
 import React from 'react';
+import {List} from '@tryghost/admin-x-design-system';
 
 const features = [{
     title: 'URL cache',
@@ -16,11 +16,7 @@ const features = [{
     description: 'Allows viewing received mentions on the dashboard.',
     flag: 'webmentions'
 },{
-    title: 'Websockets',
-    description: <>Test out Websockets functionality at <code>/ghost/#/websockets</code>.</>,
-    flag: 'websockets'
-},{
-    title: 'Stripe Automatic Tax',
+    title: 'Stripe Automatic Tax (private beta)',
     description: 'Use Stripe Automatic Tax at Stripe Checkout. Needs to be enabled in Stripe',
     flag: 'stripeAutomaticTax'
 },{
@@ -44,17 +40,21 @@ const features = [{
     description: 'Enables tier to be specified when importing members',
     flag: 'importMemberTier'
 },{
-    title: 'Tips & donations',
-    description: 'Enables publishers to collect one-time payments',
-    flag: 'tipsAndDonations'
+    title: 'AdminX Demo',
+    description: 'Adds a navigation link to the AdminX demo app',
+    flag: 'adminXDemo'
 },{
-    title: 'List-Unsubscribe header',
-    description: 'Set the List-Unsubscribe header in emails',
-    flag: 'listUnsubscribeHeader'
+    title: 'NestJS Playground',
+    description: 'Wires up the Ghost NestJS App to the Admin API (also needs GHOST_ENABLE_NEST_FRAMEWORK=1 env var)',
+    flag: 'NestPlayground'
 },{
-    title: 'Editor emoji picker',
-    description: <>Trigger an emoji picker when typing <code>{':{search}'}</code> in the editor</>,
-    flag: 'editorEmojiPicker'
+    title: 'ActivityPub',
+    description: '(Highly) Experimental support for ActivityPub.',
+    flag: 'ActivityPub'
+},{
+    title: 'Content Visibility',
+    description: 'Enables content visibility in Emails',
+    flag: 'contentVisibility'
 }];
 
 const AlphaFeatures: React.FC = () => {

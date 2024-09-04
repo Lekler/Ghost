@@ -1,11 +1,8 @@
 import {expect, test} from '@playwright/test';
-import {globalDataRequests, mockApi, responseFixtures, toggleLabsFlag} from '../../utils/acceptance';
+import {globalDataRequests} from '../../utils/acceptance';
+import {mockApi, responseFixtures} from '@tryghost/admin-x-framework/test/acceptance';
 
 test.describe('Recommendations', async () => {
-    test.beforeEach(async () => {
-        toggleLabsFlag('recommendations', true);
-    });
-
     test('can view recommendations', async ({page}) => {
         await mockApi({page, requests: {
             ...globalDataRequests,
@@ -29,7 +26,7 @@ test.describe('Recommendations', async () => {
     test('can add a recommendation', async ({page}) => {
         const {lastApiRequests} = await mockApi({page, requests: {
             ...globalDataRequests,
-            getRecommendationByUrl: {method: 'GET', path: '/recommendations/?filter=url%3A%7E%27example.com%2Fa-cool-website%27', response: {recommendations: [], meta: {}}},
+            checkRecommendation: {method: 'POST', path: '/recommendations/check/', response: {recommendations: [{url: '', one_click_subscribe: true}], meta: {}}},
             addRecommendation: {method: 'POST', path: '/recommendations/', response: {}}
         }});
 
@@ -46,7 +43,7 @@ test.describe('Recommendations', async () => {
         // Validate errors
         url.fill('not a real url');
         await modal.getByRole('button', {name: 'Next'}).click();
-        await expect(modal).toContainText('Please enter a valid URL.');
+        await expect(modal).toContainText('Enter a valid URL');
 
         // Validate success
         modal.getByRole('textbox').fill('https://example.com/a-cool-website');
@@ -58,8 +55,6 @@ test.describe('Recommendations', async () => {
 
         // Validate errors
         await title.fill('');
-        await title.blur();
-        await expect(modal).toContainText('Title is required');
 
         await description.fill('This is a long description with more than 200 characters: Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec auctor, nisl eget aliquam aliquet, nisl nunc aliquam nunc, quis aliquam nisl nunc eget nisl. Donec auctor, nisl eget aliquam aliquet, nisl nunc aliquam nunc, quis aliquam nisl nunc eget nisl. Donec auctor, nisl eget aliquam aliquet, nisl nunc aliquam nunc, quis aliquam nisl nunc eget nisl. Donec auctor, nisl eget aliquam aliquet, nisl nunc aliquam nunc, quis aliquam nisl nunc eget nisl.');
         await expect(modal).toContainText('Max: 200 characters. You’ve used 510');
@@ -74,7 +69,7 @@ test.describe('Recommendations', async () => {
                 {excerpt: null,
                     favicon: null,
                     featured_image: null,
-                    one_click_subscribe: false,
+                    one_click_subscribe: true,
                     description: 'This is a description',
                     title: 'This is a title',
                     url: 'https://example.com/a-cool-website'}
@@ -85,7 +80,7 @@ test.describe('Recommendations', async () => {
     test('errors when adding an existing URL', async ({page}) => {
         await mockApi({page, requests: {
             ...globalDataRequests,
-            getRecommendationByUrl: {method: 'GET', path: '/recommendations/?filter=url%3A%7E%27recommendation1.com%27', response: responseFixtures.recommendations}
+            checkRecommendation: {method: 'POST', path: '/recommendations/check/', response: {recommendations: [{url: 'https://recommendation1.com', one_click_subscribe: true, id: 'exists'}], meta: {}}}
         }});
 
         await page.goto('/');
@@ -126,8 +121,6 @@ test.describe('Recommendations', async () => {
 
         // Validate errors
         await title.fill('');
-        await title.blur();
-        await expect(modal).toContainText('Title is required');
 
         await description.fill('This is a long description with more than 200 characters: Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec auctor, nisl eget aliquam aliquet, nisl nunc aliquam nunc, quis aliquam nisl nunc eget nisl. Donec auctor, nisl eget aliquam aliquet, nisl nunc aliquam nunc, quis aliquam nisl nunc eget nisl. Donec auctor, nisl eget aliquam aliquet, nisl nunc aliquam nunc, quis aliquam nisl nunc eget nisl. Donec auctor, nisl eget aliquam aliquet, nisl nunc aliquam nunc, quis aliquam nisl nunc eget nisl.');
         await expect(modal).toContainText('Max: 200 characters. You’ve used 510');

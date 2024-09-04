@@ -5,6 +5,7 @@ import {authenticateSession, invalidateSession} from 'ember-simple-auth/test-sup
 import {beforeEach, describe, it} from 'mocha';
 import {blur, click, currentRouteName, currentURL, fillIn, find, findAll, triggerEvent, typeIn} from '@ember/test-helpers';
 import {datepickerSelect} from 'ember-power-datepicker/test-support';
+import {enableLabsFlag} from '../helpers/labs-flag';
 import {expect} from 'chai';
 import {selectChoose} from 'ember-power-select/test-support';
 import {setupApplicationTest} from 'ember-mocha';
@@ -117,7 +118,7 @@ describe('Acceptance: Editor', function () {
             author = this.server.create('user', {roles: [role]});
             this.server.loadFixtures('settings');
 
-            return await authenticateSession();
+            await authenticateSession();
         });
 
         describe('post settings menu', function () {
@@ -153,7 +154,7 @@ describe('Acceptance: Editor', function () {
                 await blur('[data-test-date-time-picker-time-input]');
 
                 expect(find('[data-test-date-time-picker-error]').textContent.trim(), 'inline error response for future time')
-                    .to.equal('Must be in the past');
+                    .to.equal('Please choose a past date and time.');
 
                 // closing the PSM will reset the invalid date/time
                 await click('[data-test-psm-trigger]');
@@ -235,7 +236,7 @@ describe('Acceptance: Editor', function () {
         });
 
         it('shows author token input and allows changing of authors in PSM', async function () {
-            let adminRole = this.server.create('role', {name: 'Adminstrator'});
+            let adminRole = this.server.create('role', {name: 'Administrator'});
             let authorRole = this.server.create('role', {name: 'Author'});
             let user1 = this.server.create('user', {name: 'Primary', roles: [adminRole]});
             this.server.create('user', {name: 'Waldo', roles: [authorRole]});
@@ -490,6 +491,38 @@ describe('Acceptance: Editor', function () {
             ).to.equal(0);
         });
 
+        it('handles in-editor excerpt update and validation', async function () {
+            enableLabsFlag(this.server, 'editorExcerpt');
+
+            let post = this.server.create('post', {authors: [author], customExcerpt: 'Existing excerpt'});
+
+            await visit(`/editor/post/${post.id}`);
+
+            expect(find('[data-test-textarea="excerpt"]'), 'initial textarea').to.be.visible;
+            expect(find('[data-test-textarea="excerpt"]'), 'initial textarea').to.have.value('Existing excerpt');
+
+            await fillIn('[data-test-textarea="excerpt"]', 'New excerpt');
+            expect(find('[data-test-textarea="excerpt"]'), 'updated textarea').to.have.value('New excerpt');
+
+            await triggerEvent('[data-test-textarea="excerpt"]', 'keydown', {
+                key: 's',
+                keyCode: 83, // s
+                metaKey: ctrlOrCmd === 'command',
+                ctrlKey: ctrlOrCmd === 'ctrl'
+            });
+
+            expect(post.customExcerpt, 'saved excerpt').to.equal('New excerpt');
+
+            await fillIn('[data-test-textarea="excerpt"]', Array(302).join('a'));
+
+            expect(find('[data-test-error="excerpt"]'), 'excerpt error').to.exist;
+            expect(find('[data-test-error="excerpt"]')).to.have.trimmed.text('Excerpt cannot be longer than 300 characters.');
+
+            await fillIn('[data-test-textarea="excerpt"]', Array(300).join('a'));
+
+            expect(find('[data-test-error="excerpt"]'), 'excerpt error').to.not.exist;
+        });
+
         // https://github.com/TryGhost/Ghost/issues/11786
         // NOTE: Flaky test with moving to Lexical editor, skipping for now
         it.skip('save shortcut works when tags/authors field is focused', async function () {
@@ -569,6 +602,72 @@ describe('Acceptance: Editor', function () {
                 find('[data-test-breadcrumb]').getAttribute('href'),
                 'breadcrumb link'
             ).to.equal(`/ghost/posts/analytics/${post.id}`);
+        });
+
+        it('handles TKs in title', async function () {
+            let post = this.server.create('post', {authors: [author]});
+
+            await visit(`/editor/post/${post.id}`);
+
+            expect(
+                find('[data-test-editor-title-input]').value,
+                'initial title'
+            ).to.equal('Post 0');
+
+            await fillIn('[data-test-editor-title-input]', 'Test TK Title');
+
+            expect(
+                find('[data-test-editor-title-input]').value,
+                'title after typing'
+            ).to.equal('Test TK Title');
+
+            // check for TK indicator
+            expect(
+                find('[data-testid="tk-indicator"]'),
+                'TK indicator text'
+            ).to.exist;
+
+            // click publish to see if confirmation comes up
+            await click('[data-test-button="publish-flow"]');
+
+            expect(
+                find('[data-test-modal="tk-reminder"]'),
+                'TK reminder modal'
+            ).to.exist;
+        });
+
+        it('handles TKs in excerpt', async function () {
+            enableLabsFlag(this.server, 'editorExcerpt');
+
+            const post = this.server.create('post', {authors: [author]});
+
+            await visit(`/editor/post/${post.id}`);
+
+            expect(
+                find('[data-test-textarea="excerpt"]').value,
+                'initial excerpt'
+            ).to.equal('');
+
+            await fillIn('[data-test-textarea="excerpt"]', 'Test TK excerpt');
+
+            expect(
+                find('[data-test-textarea="excerpt"]').value,
+                'excerpt after typing'
+            ).to.equal('Test TK excerpt');
+
+            // check for TK indicator
+            expect(
+                find('[data-testid="tk-indicator-excerpt"]'),
+                'TK indicator text'
+            ).to.exist;
+
+            // click publish to see if confirmation comes up
+            await click('[data-test-button="publish-flow"]');
+
+            expect(
+                find('[data-test-modal="tk-reminder"]'),
+                'TK reminder modal'
+            ).to.exist;
         });
     });
 });

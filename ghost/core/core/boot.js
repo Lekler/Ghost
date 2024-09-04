@@ -292,11 +292,8 @@ async function initAppService() {
  * Services are components that make up part of Ghost and need initializing on boot
  * These services should all be part of core, frontend services should be loaded with the frontend
  * We are working towards this being a service loader, with the ability to make certain services optional
- *
- * @param {object} options
- * @param {object} options.config
  */
-async function initServices({config}) {
+async function initServices() {
     debug('Begin: initServices');
 
     debug('Begin: Services');
@@ -330,6 +327,8 @@ async function initServices({config}) {
     const mailEvents = require('./server/services/mail-events');
     const donationService = require('./server/services/donations');
     const recommendationsService = require('./server/services/recommendations');
+    const emailAddressService = require('./server/services/email-address');
+    const statsService = require('./server/services/stats');
 
     const urlUtils = require('./shared/url-utils');
 
@@ -340,6 +339,9 @@ async function initServices({config}) {
     // NOTE: Members service depends on these
     //       so they are initialized before it.
     await stripe.init();
+
+    // NOTE: newsletter service and email service depend on email address service
+    await emailAddressService.init(),
 
     await Promise.all([
         memberAttribution.init(),
@@ -371,16 +373,47 @@ async function initServices({config}) {
         mediaInliner.init(),
         mailEvents.init(),
         donationService.init(),
-        recommendationsService.init()
+        recommendationsService.init(),
+        statsService.init()
     ]);
     debug('End: Services');
 
-    // Initialize analytics events
-    if (config.get('segment:key')) {
-        require('./server/services/segment').init();
-    }
-
     debug('End: initServices');
+}
+
+/**
+ * Set up an dependencies that need to be injected into NestJS
+ */
+async function initNestDependencies() {
+    debug('Begin: initNestDependencies');
+    const GhostNestApp = require('@tryghost/ghost');
+    const providers = [];
+    providers.push({
+        provide: 'logger',
+        useValue: require('@tryghost/logging')
+    }, {
+        provide: 'SessionService',
+        useValue: require('./server/services/auth/session').sessionService
+    }, {
+        provide: 'AdminAuthenticationService',
+        useValue: require('./server/services/auth/api-key').admin
+    }, {
+        provide: 'DomainEvents',
+        useValue: require('@tryghost/domain-events')
+    }, {
+        provide: 'SettingsCache',
+        useValue: require('./shared/settings-cache')
+    }, {
+        provide: 'knex',
+        useValue: require('./server/data/db').knex
+    }, {
+        provide: 'UrlUtils',
+        useValue: require('./shared/url-utils')
+    });
+    for (const provider of providers) {
+        GhostNestApp.addProvider(provider);
+    }
+    debug('End: initNestDependencies');
 }
 
 /**
@@ -414,6 +447,14 @@ async function initBackgroundServices({config}) {
 
     const milestonesService = require('./server/services/milestones');
     milestonesService.initAndRun();
+
+    // Ideally OpenTelemetry should be configured as early as possible
+    // However, it can take a long time to initialize, so we load it here
+    // This prevents open telemetry from impacting boot time at the cost of not being able to trace the boot process
+    debug('Begin: Load OpenTelemetry');
+    const opentelemetryInstrumentation = require('./shared/instrumentation');
+    opentelemetryInstrumentation.initOpenTelemetry({config});
+    debug('End: Load OpenTelemetry');
 
     debug('End: initBackgroundServices');
 }
@@ -479,7 +520,7 @@ async function bootGhost({backend = true, frontend = true, server = true} = {}) 
 
         // Sentry must be initialized early, but requires config
         debug('Begin: Load sentry');
-        require('./shared/sentry');
+        const sentry = require('./shared/sentry');
         debug('End: Load sentry');
 
         // Step 2 - Start server with minimal app in global maintenance mode
@@ -498,6 +539,10 @@ async function bootGhost({backend = true, frontend = true, server = true} = {}) 
         debug('Begin: Get DB ready');
         await initDatabase({config});
         bootLogger.log('database ready');
+        const connection = require('./server/data/db/connection');
+        sentry.initQueryTracing(
+            connection
+        );
         debug('End: Get DB ready');
 
         // Step 4 - Load Ghost with all its services
@@ -517,16 +562,19 @@ async function bootGhost({backend = true, frontend = true, server = true} = {}) 
 
         // TODO: move this to the correct place once we figure out where that is
         if (ghostServer) {
-            //  NOTE: changes in this labs setting requires server reboot since we don't re-init services after changes a labs flag
-            const websockets = require('./server/services/websockets');
-            await websockets.init(ghostServer);
-
             const lexicalMultiplayer = require('./server/services/lexical-multiplayer');
             await lexicalMultiplayer.init(ghostServer);
             await lexicalMultiplayer.enable();
         }
 
         await initServices({config});
+
+        // Gate the NestJS framework behind an env var to prevent it from being loaded (and slowing down boot)
+        // If we ever ship the new framework, we can remove this
+        // Using an env var because you can't use labs flags here
+        if (process.env.GHOST_ENABLE_NEST_FRAMEWORK) {
+            await initNestDependencies();
+        }
         debug('End: Load Ghost Services & Apps');
 
         // Step 5 - Mount the full Ghost app onto the minimal root app & disable maintenance mode
@@ -542,6 +590,11 @@ async function bootGhost({backend = true, frontend = true, server = true} = {}) 
 
         // Step 7 - Init our background services, we don't wait for this to finish
         initBackgroundServices({config});
+
+        // If we pass the env var, kill Ghost
+        if (process.env.GHOST_CI_SHUTDOWN_AFTER_BOOT) {
+            process.exit(0);
+        }
 
         // We return the server purely for testing purposes
         if (server) {

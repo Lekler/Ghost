@@ -15,7 +15,7 @@ const isMaintenanceModeEnabled = (req) => {
 };
 
 // We never want middleware functions to be anonymous
-const maintenanceMiddleware = (req, res, next) => {
+const maintenanceMiddleware = function maintenanceMiddleware(req, res, next) {
     if (!isMaintenanceModeEnabled(req)) {
         return next();
     }
@@ -30,7 +30,9 @@ const maintenanceMiddleware = (req, res, next) => {
 const rootApp = () => {
     const app = express('root');
     app.use(sentry.requestHandler);
-
+    if (config.get('sentry')?.tracing?.enabled === true) {
+        app.use(sentry.tracingHandler);
+    }
     app.enable('maintenance');
     app.use(maintenanceMiddleware);
 

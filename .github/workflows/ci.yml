@@ -1,6 +1,7 @@
 name: CI
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches:
       - main
@@ -12,7 +13,6 @@ on:
 env:
   FORCE_COLOR: 1
   HEAD_COMMIT: ${{ github.sha }}
-  GITHUB_CONTEXT: ${{ toJson(github) }}
   CACHED_DEPENDENCY_PATHS: |
     ${{ github.workspace }}/node_modules
     ${{ github.workspace }}/apps/*/node_modules
@@ -43,6 +43,11 @@ jobs:
           ref: ${{ env.HEAD_COMMIT }}
           fetch-depth: 2
 
+      - name: Output GitHub context
+        run: echo "$GITHUB_CONTEXT"
+        env:
+          GITHUB_CONTEXT: ${{ toJson(github) }}
+
       - name: Get metadata (push)
         if: github.event_name == 'push'
         run: |
@@ -58,7 +63,7 @@ jobs:
           echo "BASE_COMMIT=$BASE_COMMIT" >> $GITHUB_ENV
 
       - name: Determine added packages
-        uses: dorny/paths-filter@v2.11.1
+        uses: dorny/paths-filter@v2.12.0
         id: added
         with:
           filters: |
@@ -144,7 +149,7 @@ jobs:
           echo "$EOF" >> "$GITHUB_ENV"
 
       - name: Nx cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         id: cache_nx
         with:
           path: .nxcache
@@ -152,7 +157,7 @@ jobs:
           restore-keys: ${{needs.job_get_metadata.outputs.is_main == 'false' && env.NX_CACHE_RESTORE_KEYS || 'nx-never-restore'}}
 
       - name: Check dependency cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         id: cache_dependencies
         with:
           path: ${{ env.CACHED_DEPENDENCY_PATHS }}
@@ -160,14 +165,14 @@ jobs:
           restore-keys: ${{needs.job_get_metadata.outputs.is_main == 'false' && env.DEPENDENCY_CACHE_RESTORE_KEYS || 'dep-never-restore'}}
 
       - name: Check build cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         id: cache_built_packages
         with:
           path: ${{ env.CACHED_BUILD_PATHS }}
           key: ${{ env.HEAD_COMMIT }}
 
       - name: Set up Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         env:
           FORCE_COLOR: 0
         with:
@@ -192,7 +197,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 100
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         env:
           FORCE_COLOR: 0
         with:
@@ -203,7 +208,7 @@ jobs:
         env:
           DEPENDENCY_CACHE_KEY: ${{ needs.job_install_deps.outputs.dependency_cache_key }}
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: ghost/**/.eslintcache
           key: eslint-cache
@@ -228,7 +233,7 @@ jobs:
         || needs.job_get_metadata.outputs.changed_core == 'true'
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         with:
           node-version: "18.12.1"
 
@@ -252,7 +257,7 @@ jobs:
       COVERAGE: true
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         with:
           node-version: "18.12.1"
 
@@ -269,7 +274,7 @@ jobs:
       - name: Merge Admin test coverage
         run: yarn ember coverage-merge
         working-directory: ghost/admin
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: admin-coverage
           path: ghost/*/coverage/cobertura-coverage.xml
@@ -285,7 +290,7 @@ jobs:
     name: Browser tests
     timeout-minutes: 60
     runs-on:
-      labels: ubuntu-latest-4-cores
+      labels: ubuntu-latest
     needs: [job_get_metadata, job_install_deps]
     if: needs.job_get_metadata.outputs.changed_any_code == 'true' && (needs.job_get_metadata.outputs.is_main == 'true' || needs.job_get_metadata.outputs.has_browser_tests_label == 'true')
     concurrency:
@@ -294,7 +299,7 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: true
-    - uses: actions/setup-node@v3
+    - uses: actions/setup-node@v4
       env:
         FORCE_COLOR: 0
       with:
@@ -321,7 +326,7 @@ jobs:
     - name: Get Playwright version
       id: playwright-version
       run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> $GITHUB_OUTPUT
-    - uses: actions/cache@v3
+    - uses: actions/cache@v4
       name: Check if Playwright browser is cached
       id: playwright-cache
       with:
@@ -352,12 +357,60 @@ jobs:
       env:
         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@v4
       if: always()
       with:
         name: browser-tests-playwright-report
         path: ghost/core/playwright-report
         retention-days: 30
+
+  job_perf-tests:
+    runs-on:
+      labels: ubuntu-latest-4-cores
+    needs: [job_get_metadata, job_install_deps]
+    if: needs.job_get_metadata.outputs.changed_core == 'true' && needs.job_get_metadata.outputs.is_main == 'true'
+    name: Performance tests
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-node@v4
+        env:
+          FORCE_COLOR: 0
+        with:
+          node-version: '18.12.1'
+
+      - name: Restore caches
+        uses: ./.github/actions/restore-cache
+        env:
+          DEPENDENCY_CACHE_KEY: ${{ needs.job_install_deps.outputs.dependency_cache_key }}
+
+      - name: Install hyperfine
+        run: |
+          export HYPERFINE_VERSION=1.18.0
+          wget https://github.com/sharkdp/hyperfine/releases/download/v$HYPERFINE_VERSION/hyperfine-v$HYPERFINE_VERSION-x86_64-unknown-linux-gnu.tar.gz
+          tar -zxvf hyperfine-v$HYPERFINE_VERSION-x86_64-unknown-linux-gnu.tar.gz
+          mv hyperfine-v$HYPERFINE_VERSION-x86_64-unknown-linux-gnu/hyperfine /usr/local/bin
+          chmod +x /usr/local/bin/hyperfine
+
+      - name: Run hyperfine on boot
+        working-directory: ghost/core
+        run: hyperfine --show-output --warmup 3 'GHOST_CI_SHUTDOWN_AFTER_BOOT=1 node index.js' --export-json boot-perf.json
+
+      - name: Convert data
+        working-directory: ghost/core
+        run: |
+          jq '[{ name: "Boot time", unit: "s", value: .results[0].median, range: ((.results[0].max - .results[0].min) | tostring) }]' < boot-perf.json > boot-perf-formatted.json
+
+      - name: Run analysis
+        uses: benchmark-action/github-action-benchmark@v1.20.3
+        with:
+          tool: 'customSmallerIsBetter'
+          output-file-path: ghost/core/boot-perf-formatted.json
+          benchmark-data-dir-path: ""
+          gh-repository: github.com/TryGhost/Ghost-Benchmarks
+          github-token: ${{ secrets.CANARY_DOCKER_BUILD }}
+          auto-push: true
 
   job_unit-tests:
     runs-on: ubuntu-latest
@@ -365,13 +418,13 @@ jobs:
     if: needs.job_get_metadata.outputs.changed_any_code == 'true'
     strategy:
       matrix:
-        node: [ '18.12.1' ]
+        node: [ '18.12.1', '20.11.1' ]
     name: Unit tests (Node ${{ matrix.node }})
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 100
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         env:
           FORCE_COLOR: 0
         with:
@@ -384,7 +437,7 @@ jobs:
 
       - run: yarn nx affected -t test:unit --base=${{ needs.job_get_metadata.outputs.BASE_COMMIT }}
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: startsWith(matrix.node, '18')
         with:
           name: unit-coverage
@@ -403,7 +456,7 @@ jobs:
     if: needs.job_get_metadata.outputs.changed_core == 'true'
     strategy:
       matrix:
-        node: [ '18.12.1' ]
+        node: [ '18.12.1', '20.11.1' ]
         env:
           - DB: mysql8
             NODE_ENV: testing-mysql
@@ -418,7 +471,7 @@ jobs:
     name: Database tests (Node ${{ matrix.node }}, ${{ matrix.env.DB }})
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         env:
           FORCE_COLOR: 0
         with:
@@ -467,7 +520,7 @@ jobs:
           endTime="$(date +%s)"
           echo "test_time=$(($endTime-$startTime))" >> $GITHUB_ENV
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: startsWith(matrix.node, '18') && contains(matrix.env.DB, 'mysql')
         with:
           name: e2e-coverage
@@ -539,7 +592,9 @@ jobs:
     name: Regression tests (Node ${{ matrix.node }}, ${{ matrix.env.DB }})
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
+        with:
+          submodules: true
+      - uses: actions/setup-node@v4
         env:
           FORCE_COLOR: 0
         with:
@@ -590,7 +645,7 @@ jobs:
       CI: true
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         env:
           FORCE_COLOR: 0
         with:
@@ -604,7 +659,7 @@ jobs:
       - name: Get Playwright version
         id: playwright-version
         run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> $GITHUB_OUTPUT
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         name: Check if Playwright browser is cached
         id: playwright-cache
         with:
@@ -621,7 +676,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: admin-x-settings-playwright-report
           path: apps/admin-x-settings/playwright-report
@@ -643,7 +698,7 @@ jobs:
       CI: true
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         env:
           FORCE_COLOR: 0
         with:
@@ -657,7 +712,7 @@ jobs:
       - name: Get Playwright version
         id: playwright-version
         run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> $GITHUB_OUTPUT
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         name: Check if Playwright browser is cached
         id: playwright-cache
         with:
@@ -674,7 +729,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: comments-ui-playwright-report
           path: apps/comments-ui/playwright-report
@@ -696,7 +751,7 @@ jobs:
       CI: true
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         env:
           FORCE_COLOR: 0
         with:
@@ -710,7 +765,7 @@ jobs:
       - name: Get Playwright version
         id: playwright-version
         run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> $GITHUB_OUTPUT
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         name: Check if Playwright browser is cached
         id: playwright-cache
         with:
@@ -727,7 +782,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: signup-form-playwright-report
           path: apps/signup-form/playwright-report
@@ -750,7 +805,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: true
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         env:
           FORCE_COLOR: 0
         with:
@@ -779,7 +834,7 @@ jobs:
           echo "V4_DIR=$DIR" >> $GITHUB_ENV
           ghost install v4 --local -d $DIR
 
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         env:
           FORCE_COLOR: 0
         with:
@@ -788,6 +843,13 @@ jobs:
       - name: Update from v4
         run: |
           ghost update -f -d $V4_DIR --archive $(pwd)/ghost/core/ghost.tgz
+
+      - name: Save Ghost CLI Debug Logs
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: ghost-cli-debug-logs
+          path: /home/runner/.ghost/logs/
 
       - name: Clean Install
         run: |
@@ -825,7 +887,7 @@ jobs:
 
       - name: Restore Admin coverage
         if: contains(needs.job_admin-tests.result, 'success')
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: admin-coverage
 
@@ -842,7 +904,7 @@ jobs:
 
       - name: Restore E2E coverage
         if: contains(needs.job_database-tests.result, 'success')
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: e2e-coverage
 
