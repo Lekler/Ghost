@@ -1,32 +1,73 @@
 import Component from '@glimmer/component';
 import fetch from 'fetch';
+import moment from 'moment-timezone';
 import {action} from '@ember/object';
+import {formatNumber} from 'ghost-admin/helpers/format-number';
 import {inject} from 'ghost-admin/decorators/inject';
 import {task} from 'ember-concurrency';
 import {tracked} from '@glimmer/tracking';
 
 export default class KpisOverview extends Component {
     @inject config;
-    @tracked selected = 'visits';
+    @tracked selected = 'unique_visits';
     @tracked totals = null;
+    @tracked showGranularity = true;
+
+    get granularityOptions() {
+        const chartRange = this.args.chartRange;
+        if (chartRange >= 8 && chartRange <= 30) {
+            return [
+                {name: 'Days', value: 'days'},
+                {name: 'Weeks', value: 'weeks'}
+            ];
+        } else if (chartRange > 30 && chartRange <= 365) {
+            return [
+                {name: 'Days', value: 'days'},
+                {name: 'Weeks', value: 'weeks'},
+                {name: 'Months', value: 'months'}
+            ];
+        } else {
+            return [
+                {name: 'Weeks', value: 'weeks'},
+                {name: 'Months', value: 'months'}
+            ];
+        }
+    }
+
+    @tracked granularity = this.granularityOptions[0];
+
+    @action
+    onGranularityChange(selected) {
+        this.granularity = selected;
+    }
 
     constructor() {
         super(...arguments);
-        this.fetchData.perform();
+        this.fetchDataIfNeeded();
     }
 
-    setupFocusListener() {
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) {
-                this.fetchData.perform();
-            }
-        });
+    @action
+    fetchDataIfNeeded() {
+        this.fetchData.perform(this.args.chartRange, this.args.audience);
     }
 
     @task
-    *fetchData() {
+    *fetchData(chartRange, audience) {
         try {
-            const response = yield fetch(`${this.config.stats.endpoint}/v0/pipes/kpis.json?site_uuid=${this.config.stats.id}`, {
+            const endDate = moment().endOf('day');
+            const startDate = moment().subtract(chartRange - 1, 'days').startOf('day');
+
+            const params = new URLSearchParams({
+                site_uuid: this.config.stats.id,
+                date_from: startDate.format('YYYY-MM-DD'),
+                date_to: endDate.format('YYYY-MM-DD')
+            });
+
+            if (audience.length > 0) {
+                params.append('member_status', audience.join(','));
+            }
+
+            const response = yield fetch(`${this.config.stats.endpoint}/v0/pipes/kpis.json?${params}`, {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
@@ -61,8 +102,8 @@ export default class KpisOverview extends Component {
 
         return {
             avg_session_sec: Math.floor(_ponderatedKPIsTotal('avg_session_sec') / 60),
-            pageviews: _KPITotal('pageviews'),
-            visits: totalVisits,
+            pageviews: formatNumber(_KPITotal('pageviews')),
+            visits: formatNumber(totalVisits),
             bounce_rate: _ponderatedKPIsTotal('bounce_rate').toFixed(2)
         };
     }
@@ -74,8 +115,8 @@ export default class KpisOverview extends Component {
     }
 
     @action
-    changeTabToVisits() {
-        this.selected = 'visits';
+    changeTabToUniqueVisits() {
+        this.selected = 'unique_visits';
     }
 
     @action
@@ -93,8 +134,8 @@ export default class KpisOverview extends Component {
         this.selected = 'bounce_rate';
     }
 
-    get visitsTabSelected() {
-        return (this.selected === 'visits');
+    get uniqueVisitsTabSelected() {
+        return (this.selected === 'unique_visits');
     }
 
     get pageviewsTabSelected() {
