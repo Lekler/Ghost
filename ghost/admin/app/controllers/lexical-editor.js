@@ -196,7 +196,7 @@ export default class LexicalEditorController extends Controller {
     _pushPostState() {
         const post = this.post;
 
-        if (!post) {
+        if (!post || !post.currentState) {
             return;
         }
 
@@ -316,14 +316,10 @@ export default class LexicalEditorController extends Controller {
     updateScratch(lexical) {
         const lexicalString = JSON.stringify(lexical);
         this.set('post.lexicalScratch', lexicalString);
-
         try {
-            // schedule a local revision save
-            if (this.post.status === 'draft') {
-                this.localRevisions.scheduleSave(this.post.displayName, {...this.post.serialize({includeId: true}), lexical: lexicalString});
-            }
-        } catch (err) {
-            // ignore errors
+            this.localRevisions.scheduleSave(this.post.displayName, {...this.post.serialize({includeId: true}), lexical: lexicalString});
+        } catch (e) {
+            // ignore revision save errors
         }
 
         // save 3 seconds after last edit
@@ -341,12 +337,9 @@ export default class LexicalEditorController extends Controller {
     updateTitleScratch(title) {
         this.set('post.titleScratch', title);
         try {
-            // schedule a local revision save
-            if (this.post.status === 'draft') {
-                this.localRevisions.scheduleSave(this.post.displayName, {...this.post.serialize({includeId: true}), title: title});
-            }
-        } catch (err) {
-            // ignore errors
+            this.localRevisions.scheduleSave(this.post.displayName, {...this.post.serialize({includeId: true}), title: title});
+        } catch (e) {
+            // ignore revision save errors
         }
     }
 
@@ -505,7 +498,9 @@ export default class LexicalEditorController extends Controller {
 
     @action
     setFeatureImageCaption(html) {
-        this.post.set('featureImageCaption', html);
+        if (!this.post.isDestroyed || !this.post.isDestroying) {
+            this.post.set('featureImageCaption', html);
+        }
     }
 
     @action
@@ -1117,13 +1112,12 @@ export default class LexicalEditorController extends Controller {
 
         // triggered any time the admin tab is closed, we need to use a native
         // dialog here instead of our custom modal
-        window.onbeforeunload = () => {
+        window.onbeforeunload = (event) => {
             if (this.hasDirtyAttributes) {
-                return '==============================\n\n'
-                     + 'Hey there! It looks like you\'re in the middle of writing'
-                     + ' something and you haven\'t saved all of your content.'
-                     + '\n\nSave before you go!\n\n'
-                     + '==============================';
+                console.log('Preventing unload due to hasDirtyAttributes'); // eslint-disable-line
+                event.preventDefault();
+                // Included for legacy support, e.g. Chrome/Edge < 119
+                event.returnValue = true;
             }
         };
     }
@@ -1167,6 +1161,11 @@ export default class LexicalEditorController extends Controller {
 
         let hasDirtyAttributes = this.hasDirtyAttributes;
         let state = post.getProperties('isDeleted', 'isSaving', 'hasDirtyAttributes', 'isNew');
+
+        if (state.isDeleted) {
+            // if the post is deleted, we don't need to save it
+            hasDirtyAttributes = false;
+        }
 
         // Check if anything has changed since the last revision
         let postRevisions = post.get('postRevisions').toArray();
